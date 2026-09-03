@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史任务组列表</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="history.css">
+</head>
+<body>
+    <div class="history-container">
+        <div class="history-header">
+            <h1>📚 历史任务组</h1>
+            <a href="/" class="back-btn">← 返回主页面</a>
+        </div>
+        <div id="historyList">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadHistory() {
+            const container = document.getElementById('historyList');
+            try {
+                const res = await fetch('/api/history');
+                if (!res.ok) throw new Error('加载失败');
+                const data = await res.json();
+                
+                if (data.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <span class="emoji">📭</span>
+                            <p>暂无历史记录</p>
+                            <p style="font-size:14px;margin-top:8px;">管理员可在管理面板中保存历史快照</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = data.map(item => `
+                    <div class="history-item" onclick="window.location.href='/history-detail.html?id=${item.id}'">
+                        <div class="history-info">
+                            <div class="time">${formatTime(item.timestamp)}</div>
+                            <div class="reason">📝 ${escapeHtml(item.reason || '手动保存')}</div>
+                        </div>
+                        <div class="history-stats">
+                            <span>📋 总数 <strong>${item.total}</strong></span>
+                            <span>✅ 已认领 <strong>${item.claimed}</strong></span>
+                            <span>✔ 已完成 <strong>${item.completed}</strong></span>
+                            <span>⬜ 未认领 <strong>${item.unclaimed}</strong></span>
+                        </div>
+                        <button class="view-btn" onclick="event.stopPropagation();window.location.href='/history-detail.html?id=${item.id}'">查看详情 →</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                container.innerHTML = `<div class="empty-state"><span class="emoji">❌</span><p>加载失败: ${err.message}</p></div>`;
+            }
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        loadHistory();
+    </script>
+</body>
+</html>

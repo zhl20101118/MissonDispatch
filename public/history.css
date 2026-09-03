@@ -1,0 +1,245 @@
+/* ==================== 历史页面共用样式 ==================== */
+.history-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    border-bottom: 2px solid #eef2f6;
+    padding-bottom: 16px;
+}
+
+.history-header h1 {
+    font-size: 26px;
+    color: #0b1a2e;
+}
+
+.back-btn {
+    display: inline-block;
+    padding: 8px 20px;
+    background: #f0f4f8;
+    color: #1e2a3a;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.back-btn:hover {
+    background: #e2e8f0;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #7a8fa3;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #7a8fa3;
+}
+
+.empty-state .emoji {
+    font-size: 48px;
+    display: block;
+    margin-bottom: 12px;
+}
+
+/* ==================== 历史列表页特有 ==================== */
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #fbfdff;
+    border: 1.5px solid #e9eef4;
+    border-radius: 14px;
+    margin-bottom: 12px;
+    transition: all 0.15s;
+    cursor: pointer;
+}
+
+.history-item:hover {
+    border-color: #1a73e8;
+    background: #f5f9ff;
+    transform: translateX(4px);
+}
+
+.history-info {
+    flex: 1;
+}
+
+.history-info .time {
+    font-size: 16px;
+    font-weight: 600;
+    color: #0b1a2e;
+}
+
+.history-info .reason {
+    font-size: 14px;
+    color: #5a6f84;
+    margin-top: 4px;
+}
+
+.history-stats {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.history-stats span {
+    font-size: 14px;
+    color: #2c3e50;
+}
+
+.history-stats strong {
+    font-weight: 700;
+    color: #0b1a2e;
+}
+
+.view-btn {
+    padding: 6px 16px;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
+    margin-left: 12px;
+}
+
+.view-btn:hover {
+    background: #1557b0;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(26, 115, 232, 0.25);
+}
+
+/* ==================== 历史详情页特有 ==================== */
+.history-meta {
+    background: #f8faff;
+    padding: 16px 20px;
+    border-radius: 14px;
+    border: 1px solid #e9eef4;
+    margin-bottom: 24px;
+}
+
+.history-meta .meta-item {
+    display: inline-block;
+    margin-right: 24px;
+    font-size: 14px;
+    color: #2c3e50;
+}
+
+.history-meta .meta-item strong {
+    color: #0b1a2e;
+}
+
+.history-task {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 20px;
+    background: #fbfdff;
+    border-radius: 12px;
+    border: 1.5px solid #e9eef4;
+    margin-bottom: 10px;
+}
+
+.history-task .task-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.history-task .task-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.history-task .task-id {
+    font-weight: 600;
+    font-size: 14px;
+    color: #8a9db0;
+    background: #f0f4f8;
+    padding: 2px 10px;
+    border-radius: 30px;
+    min-width: 34px;
+    text-align: center;
+}
+
+.history-task .task-desc {
+    font-size: 16px;
+    font-weight: 500;
+    color: #0b1a2e;
+}
+
+.history-task .badge {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 40px;
+    background: #eef2f6;
+    color: #2c3e50;
+    white-space: nowrap;
+}
+
+.badge.claimed {
+    background: #e3f0fa;
+    color: #0f5b8a;
+}
+
+.badge.unclaimed {
+    background: #e8f5e9;
+    color: #1e6b3b;
+}
+
+.badge.completed {
+    background: #d4edda;
+    color: #155724;
+}
+
+.badge.incomplete {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.history-task .claimant-name {
+    font-size: 14px;
+    color: #1a73e8;
+    background: #e9f0fa;
+    padding: 2px 14px;
+    border-radius: 40px;
+}
+
+.history-task .notes-text {
+    font-size: 14px;
+    color: #2c3e50;
+    background: #f8faff;
+    padding: 4px 12px;
+    border-radius: 20px;
+    word-break: break-word;
+}
+
+.error {
+    text-align: center;
+    padding: 60px 20px;
+    color: #c62828;
+}
+
+.error .emoji {
+    font-size: 48px;
+    display: block;
+    margin-bottom: 12px;
+}

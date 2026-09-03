@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史任务详情</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="history.css">
+</head>
+<body>
+    <div class="history-container">
+        <div class="history-header">
+            <h1>📋 历史任务详情</h1>
+            <a href="/history.html" class="back-btn">← 返回列表</a>
+        </div>
+        <div id="historyDetail">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const id = urlParams.get('id');
+
+        async function loadHistoryDetail() {
+            const container = document.getElementById('historyDetail');
+            
+            if (!id) {
+                container.innerHTML = `
+                    <div class="error">
+                        <span class="emoji">❌</span>
+                        <p>缺少历史记录ID</p>
+                    </div>
+                `;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/history/${id}`);
+                if (!res.ok) {
+                    if (res.status === 404) {
+                        throw new Error('历史记录不存在');
+                    }
+                    throw new Error('加载失败');
+                }
+                const data = await res.json();
+                
+                const metaHtml = `
+                    <div class="history-meta">
+                        <span class="meta-item">📅 保存时间：<strong>${formatTime(data.timestamp)}</strong></span>
+                        <span class="meta-item">📝 备注：<strong>${escapeHtml(data.reason || '手动保存')}</strong></span>
+                        <span class="meta-item">📋 任务总数：<strong>${data.tasks.length}</strong></span>
+                    </div>
+                `;
+
+                const tasksHtml = data.tasks.map(task => {
+                    const claimed = task.claimed;
+                    const completed = task.completed;
+                    const claimant = task.claimant || '';
+                    const notes = task.notes || '';
+                    const lock = task.completionLock || 'none';
+
+                    let displayCompleted = completed;
+                    if (lock === 'force_completed') displayCompleted = true;
+                    else if (lock === 'force_uncompleted') displayCompleted = false;
+
+                    const statusBadge = claimed 
+                        ? `<span class="badge claimed">✅ 已认领</span>` 
+                        : `<span class="badge unclaimed">⬜ 未认领</span>`;
+                    const completeBadge = displayCompleted 
+                        ? `<span class="badge completed">✔ 已完成</span>` 
+                        : `<span class="badge incomplete">⏳ 未完成</span>`;
+
+                    let claimantHtml = '';
+                    if (claimed && claimant) {
+                        claimantHtml = `<span class="claimant-name">👤 ${escapeHtml(claimant)}</span>`;
+                    }
+
+                    const notesHtml = notes 
+                        ? `<span class="notes-text">${escapeHtml(notes)}</span>` 
+                        : '';
+
+                    return `
+                        <div class="history-task">
+                            <div class="task-row">
+                                <div class="task-info">
+                                    <span class="task-id">#${task.id}</span>
+                                    <span class="task-desc">${escapeHtml(task.description)}</span>
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                    ${statusBadge}
+                                    ${completeBadge}
+                                    ${claimantHtml}
+                                </div>
+                            </div>
+                            ${notesHtml ? `<div class="task-row"><div style="display:flex;align-items:center;gap:8px;width:100%;"><span style="font-size:13px;color:#5a6f84;">📝 备注：</span>${notesHtml}</div></div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML = metaHtml + tasksHtml;
+
+            } catch (err) {
+                container.innerHTML = `
+                    <div class="error">
+                        <span class="emoji">❌</span>
+                        <p>加载失败: ${err.message}</p>
+                        <p style="font-size:14px;margin-top:8px;color:#7a8fa3;">
+                            <a href="/history.html" style="color:#1a73e8;">返回历史列表</a>
+                        </p>
+                    </div>
+                `;
+            }
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        loadHistoryDetail();
+    </script>
+</body>
+</html>

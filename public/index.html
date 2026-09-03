@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务认领系统 · 增强版</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app" id="app">
+        <header class="header">
+            <h1>📋 任务认领 <span id="taskCount">0</span></h1>
+            <div class="header-actions">
+                <a href="/history" class="btn btn-outline">📚 历史记录</a>
+                <button class="btn btn-admin" id="adminToggleBtn">🔐 管理员</button>
+            </div>
+        </header>
+        <div class="stats" id="stats">
+            <div class="stats-item"><strong id="totalCount">0</strong><span class="label">全部</span></div>
+            <div class="stats-item"><strong id="claimedCount">0</strong><span class="label">已认领</span></div>
+            <div class="stats-item"><strong id="completedCount">0</strong><span class="label">已完成</span></div>
+        </div>
+        <div class="task-list" id="taskList"></div>
+    </div>
+
+    <!-- 认领模态框 -->
+    <div class="modal-overlay hidden" id="claimModal">
+        <div class="modal">
+            <h2>✋ 认领任务</h2>
+            <p class="sub" id="claimTaskDesc">任务描述</p>
+            <div class="form-group">
+                <label for="claimNameInput">你的姓名</label>
+                <input type="text" id="claimNameInput" placeholder="请输入你的姓名" maxlength="30" />
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-outline" id="claimCancelBtn">取消</button>
+                <button class="btn btn-success" id="claimConfirmBtn">确认认领</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 管理员模态框 -->
+    <div class="modal-overlay hidden" id="adminModal">
+        <div class="modal admin-modal">
+            <h2>🔐 管理员面板</h2>
+            <p class="sub">管理任务列表 · 锁定分配 · 任务级完成锁定</p>
+            <div id="adminLoginArea">
+                <div class="form-group">
+                    <label for="adminPasswordInput">管理员密码</label>
+                    <input type="password" id="adminPasswordInput" placeholder="请输入密码" />
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-outline" id="adminCloseBtn">关闭</button>
+                    <button class="btn btn-primary" id="adminLoginBtn">验证</button>
+                </div>
+                <div class="hint" style="margin-top:10px;">默认密码：<strong>滚木！</strong></div>
+            </div>
+            <div id="adminPanel" class="admin-panel-scroll" style="display:none;">
+                <!-- 顶部操作按钮 -->
+                <div style="margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn btn-danger btn-sm" id="adminResetBtn">🔄 重置所有</button>
+                    <button class="btn btn-primary btn-sm" id="saveHistoryBtn">💾 保存历史快照</button>
+                    <button class="btn btn-outline btn-sm" id="adminLogoutBtn">退出管理</button>
+                </div>
+
+                <!-- 全局锁定分配 -->
+                <div style="border-top:2px solid #eef2f6; margin:16px 0 18px;"></div>
+                <div class="form-group">
+                    <label style="font-weight:600;">🔒 全局锁定分配</label>
+                    <div style="display:flex; gap:16px; margin-top:6px;">
+                        <label><input type="radio" name="allocationLock" value="false"> 不锁定</label>
+                        <label><input type="radio" name="allocationLock" value="true"> 锁定（禁止新认领）</label>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button class="btn btn-primary btn-sm" id="saveConfigBtn">💾 保存分配配置</button>
+                    <span class="hint" style="margin-left:12px;">（需管理员密码）</span>
+                </div>
+
+                <!-- 任务管理 -->
+                <div style="border-top:2px solid #eef2f6; margin:16px 0 18px;"></div>
+                <div class="form-group">
+                    <label for="adminTaskInput">添加单个任务</label>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <input type="text" id="adminTaskInput" placeholder="输入任务描述" style="flex:1; min-width:140px;" />
+                        <button class="btn btn-primary btn-sm" id="adminAddBtn">➕ 添加</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="adminBatchInput">批量设置任务列表（每行一个）</label>
+                    <textarea id="adminBatchInput" placeholder="任务1&#10;任务2&#10;任务3"></textarea>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+                        <button class="btn btn-primary btn-sm" id="adminBatchSetBtn">📋 替换全部任务</button>
+                        <span class="hint" style="align-self:center;">（将清除所有数据）</span>
+                    </div>
+                </div>
+
+                <!-- 任务列表（含锁定设置） -->
+                <div style="border-top:2px solid #eef2f6; margin:18px 0 12px;"></div>
+                <div>
+                    <label style="font-weight:600; font-size:14px; color:#1e2a3a;">任务列表与锁定设置</label>
+                    <div id="adminTaskList" style="margin-top:6px; max-height:300px; overflow-y:auto; background:#f8faff; border-radius:12px; padding:8px 4px; border:1px solid #e9eef4;"></div>
+                </div>
+
+                <div class="form-actions" style="margin-top:16px;">
+                    <button class="btn btn-outline" id="adminCloseBtn2">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script type="module">
+        import './common.js';
+        import './user.js';
+        import './admin.js';
+    </script>
+</body>
+</html>
