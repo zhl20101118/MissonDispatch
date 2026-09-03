@@ -7,380 +7,407 @@ const app = express();
 const PORT = 3000;
 
 const DATA_FILE = path.join(__dirname, 'tasks.json');
-const HISTORY_DIR = path.join(__dirname, 'public', 'history');
-const HISTORY_INDEX_FILE = path.join(HISTORY_DIR, 'index.json');
 
-// 确保历史目录存在
-if (!fs.existsSync(HISTORY_DIR)) {
-    fs.mkdirSync(HISTORY_DIR, { recursive: true });
+// 默认管理员密码（可在管理面板中修改）
+const DEFAULT_ADMIN_PASSWORD = '滚木！';
+
+// 洛谷风格难度档位（与前端 public/common.js 一致）
+const DIFFICULTIES = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'black'];
+
+// ---------- 工具函数 ----------
+function hashPassword(pw) {
+    return crypto.createHash('sha256').update(String(pw)).digest('hex');
 }
 
-// 生成任务密钥
-function generateTaskKey() {
-    return crypto.randomBytes(16).toString('hex');
+let nextAccountId = 1, nextTaskId = 1, nextCompetitionId = 1, nextProblemId = 1;
+
+// ---------- 默认数据 ----------
+function defaultData() {
+    return {
+        config: { adminPassword: DEFAULT_ADMIN_PASSWORD, lockEditing: false },
+        accounts: [],          // { id, name, password(hash), createdAt }
+        dailyTasks: [],        // { id, date, title, createdAt }
+        competitions: [],      // { id, dailyTaskId, accountId, title, progress, notes, createdAt, updatedAt }
+        problems: []           // { id, dailyTaskId, accountId, title, link, difficulty, createdAt }
+    };
 }
 
-const DEFAULT_TASKS = [
-    { id: 1, description: '完成项目报告', claimed: false, claimant: '', key: '', completed: false, notes: '', completionLock: 'none' },
-    { id: 2, description: '代码审查', claimed: false, claimant: '', key: '', completed: false, notes: '', completionLock: 'none' },
-    { id: 3, description: '部署测试环境', claimed: false, claimant: '', key: '', completed: false, notes: '', completionLock: 'none' }
-];
-
-let globalConfig = { allocationLocked: false };
-
-// ==================== 历史记录管理 ====================
-function saveHistorySnapshot(tasks, reason) {
+function loadData() {
     try {
-        const timestamp = new Date().toISOString();
-        const filename = `history_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.json`;
-        const filePath = path.join(HISTORY_DIR, filename);
-        
-        // 统计任务状态
-        const total = tasks.length;
-        const claimed = tasks.filter(t => t.claimed).length;
-        const completed = tasks.filter(t => t.completed).length;
-        const unclaimed = total - claimed;
-        
-        // 保存快照数据（不含密钥，保护隐私）
-        const snapshot = {
-            timestamp,
-            reason: reason || '手动保存',
-            tasks: tasks.map(t => ({
-                id: t.id,
-                description: t.description,
-                claimed: t.claimed,
-                claimant: t.claimant || '',
-                completed: t.completed,
-                notes: t.notes || '',
-                completionLock: t.completionLock || 'none'
-                // 不保存 key 字段，保护隐私
-            }))
-        };
-        
-        fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2));
-        
-        // 更新索引
-        let index = [];
-        if (fs.existsSync(HISTORY_INDEX_FILE)) {
-            index = JSON.parse(fs.readFileSync(HISTORY_INDEX_FILE, 'utf-8'));
-        }
-        
-        index.unshift({
-            id: filename.replace('.json', ''),
-            filename: filename,
-            timestamp: timestamp,
-            reason: reason || '手动保存',
-            total: total,
-            claimed: claimed,
-            completed: completed,
-            unclaimed: unclaimed
-        });
-        
-        // 限制历史数量（保留最近100条）
-        if (index.length > 100) {
-            const toRemove = index.slice(100);
-            index = index.slice(0, 100);
-            // 删除多余的文件
-            toRemove.forEach(item => {
-                try {
-                    const filePath = path.join(HISTORY_DIR, item.filename);
-                    if (fs.existsSync(filePath)) {
-                        fs.unlinkSync(filePath);
-                    }
-                } catch (e) {
-                    console.warn('删除历史文件失败:', e);
-                }
-            });
-        }
-        
-        fs.writeFileSync(HISTORY_INDEX_FILE, JSON.stringify(index, null, 2));
-        console.log(`📚 已保存历史快照: ${filename} (${reason})`);
-        return true;
+        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        // 兼容/迁移：直接取需要的字段
+        const data = defaultData();
+        data.config = Object.assign(data.config, (parsed && parsed.config) || {});
+        data.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+        data.dailyTasks = Array.isArray(parsed.dailyTasks) ? parsed.dailyTasks : [];
+        data.competitions = Array.isArray(parsed.competitions) ? parsed.competitions : [];
+        data.problems = Array.isArray(parsed.problems) ? parsed.problems : [];
+        // 重新计算自增 id
+        nextAccountId = (data.accounts.reduce((m, a) => Math.max(m, a.id || 0), 0)) + 1;
+        nextTaskId = (data.dailyTasks.reduce((m, a) => Math.max(m, a.id || 0), 0)) + 1;
+        nextCompetitionId = (data.competitions.reduce((m, a) => Math.max(m, a.id || 0), 0)) + 1;
+        nextProblemId = (data.problems.reduce((m, a) => Math.max(m, a.id || 0), 0)) + 1;
+        return data;
     } catch (err) {
-        console.error('保存历史快照失败:', err);
-        return false;
+        const data = defaultData();
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        return data;
     }
 }
 
-// ==================== 加载任务数据 ====================
-function loadTasks() {
-    try {
-        const data = fs.readFileSync(DATA_FILE, 'utf-8');
-        const parsed = JSON.parse(data);
-        let tasks, config;
-        if (Array.isArray(parsed)) {
-            tasks = parsed;
-            config = { allocationLocked: false };
-            const newData = { tasks, config };
-            fs.writeFileSync(DATA_FILE, JSON.stringify(newData, null, 2));
-            globalConfig = config;
-            tasks = tasks.map(t => ({
-                ...t,
-                completed: t.completed !== undefined ? t.completed : false,
-                notes: t.notes !== undefined ? t.notes : '',
-                completionLock: t.completionLock || 'none',
-                key: t.key || ''
-            }));
-            return tasks;
-        } else {
-            tasks = parsed.tasks || [];
-            config = parsed.config || { allocationLocked: false };
-            tasks = tasks.map(t => ({
-                ...t,
-                completed: t.completed !== undefined ? t.completed : false,
-                notes: t.notes !== undefined ? t.notes : '',
-                completionLock: t.completionLock || 'none',
-                key: t.key || ''
-            }));
-            globalConfig = config;
-            return tasks;
-        }
-    } catch (err) {
-        const defaultData = {
-            tasks: DEFAULT_TASKS,
-            config: { allocationLocked: false }
-        };
-        fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2));
-        globalConfig = defaultData.config;
-        return defaultData.tasks;
-    }
-}
+let data = loadData();
 
-function saveTasks(tasks) {
-    const data = { tasks, config: globalConfig };
+function saveData() {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-let tasks = loadTasks();
-let nextId = tasks.length > 0 ? Math.max(...tasks.map(t => t.id)) + 1 : 1;
+// 公开数据（去掉账号密码）
+function publicData() {
+    return {
+        config: {
+            adminPasswordSet: !!data.config.adminPassword,
+            lockEditing: !!data.config.lockEditing
+        },
+        accounts: data.accounts.map(a => ({ id: a.id, name: a.name, createdAt: a.createdAt })),
+        dailyTasks: data.dailyTasks,
+        competitions: data.competitions,
+        problems: data.problems
+    };
+}
+
+// 管理员鉴权
+function isAdmin(password) {
+    return hashPassword(password) === hashPassword(data.config.adminPassword);
+}
+
+// 成员鉴权：返回账号或 null
+function findAccount(id) {
+    return data.accounts.find(a => a.id === Number(id));
+}
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 重定向 /history 到 /history.html
-app.get('/history', (req, res) => {
-    res.redirect('/history.html');
+// ---------- 公开读取 ----------
+app.get('/api/data', (req, res) => {
+    res.json(publicData());
 });
 
-// 重定向 /history-detail 到 /history-detail.html
-app.get('/history-detail', (req, res) => {
-    const query = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-    res.redirect(`/history-detail.html${query}`);
+// ---------- 成员认证 ----------
+app.post('/api/auth/login', (req, res) => {
+    const { name, password } = req.body;
+    if (!name || password === undefined) return res.status(400).json({ message: '缺少姓名或密码' });
+    const account = data.accounts.find(a => a.name.trim() === String(name).trim());
+    if (!account) return res.status(401).json({ message: '账号不存在' });
+    if (account.password !== hashPassword(password)) return res.status(401).json({ message: '密码错误' });
+    res.json({ success: true, account: { id: account.id, name: account.name } });
 });
 
-// ---------- 公开 API ----------
-app.get('/api/tasks', (req, res) => res.json({ tasks }));
-app.get('/api/config', (req, res) => res.json(globalConfig));
-
-// 获取历史索引
-app.get('/api/history', (req, res) => {
-    try {
-        if (fs.existsSync(HISTORY_INDEX_FILE)) {
-            const index = JSON.parse(fs.readFileSync(HISTORY_INDEX_FILE, 'utf-8'));
-            res.json(index);
-        } else {
-            res.json([]);
-        }
-    } catch (err) {
-        res.status(500).json({ message: '读取历史索引失败' });
-    }
+// 修改自己的密码
+app.post('/api/auth/change-password', (req, res) => {
+    const { accountId, oldPassword, newPassword } = req.body;
+    const account = findAccount(accountId);
+    if (!account) return res.status(404).json({ message: '账号不存在' });
+    if (account.password !== hashPassword(oldPassword)) return res.status(401).json({ message: '原密码错误' });
+    if (!newPassword || String(newPassword).length < 1) return res.status(400).json({ message: '新密码不能为空' });
+    account.password = hashPassword(newPassword);
+    saveData();
+    res.json({ message: '密码修改成功' });
 });
 
-// 获取历史快照详情
-app.get('/api/history/:id', (req, res) => {
-    try {
-        const id = req.params.id;
-        const filename = `${id}.json`;
-        const filePath = path.join(HISTORY_DIR, filename);
-        if (fs.existsSync(filePath)) {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-            res.json(data);
-        } else {
-            res.status(404).json({ message: '历史记录不存在' });
-        }
-    } catch (err) {
-        res.status(500).json({ message: '读取历史详情失败' });
-    }
+// ---------- 成员操作（需账号+密码） ----------
+// 校验成员身份
+function verifyMember(accountId, password) {
+    const account = findAccount(accountId);
+    if (!account) return null;
+    if (account.password !== hashPassword(password)) return null;
+    return account;
+}
+
+// 更新自己比赛的进度/备注
+app.patch('/api/competition/:id/progress', (req, res) => {
+    const id = Number(req.params.id);
+    const { accountId, password, progress, notes } = req.body;
+    const comp = data.competitions.find(c => c.id === id);
+    if (!comp) return res.status(404).json({ message: '比赛不存在' });
+    const member = verifyMember(accountId, password);
+    if (!member) return res.status(401).json({ message: '身份校验失败' });
+    if (comp.accountId !== member.id) return res.status(403).json({ message: '无权更新该比赛' });
+    if (data.config.lockEditing) return res.status(403).json({ message: '当前已锁定，禁止编辑' });
+    if (['pending', 'ongoing', 'done'].includes(progress)) comp.progress = progress;
+    comp.notes = notes !== undefined ? String(notes) : comp.notes;
+    comp.updatedAt = new Date().toISOString();
+    saveData();
+    res.json({ message: '已更新', competition: comp });
 });
 
-// 认领任务（生成并返回密钥）
-app.post('/api/tasks/claim', (req, res) => {
-    const { taskId, name } = req.body;
-    if (!taskId || !name) return res.status(400).json({ message: '缺少任务ID或姓名' });
-    if (globalConfig.allocationLocked) return res.status(403).json({ message: '分配已被管理员锁定' });
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return res.status(404).json({ message: '任务不存在' });
-    if (task.claimed) return res.status(409).json({ message: '该任务已被认领' });
-    
-    const key = generateTaskKey();
-    task.claimed = true;
-    task.claimant = name.trim();
-    task.key = key;
-    saveTasks(tasks);
-    res.json({ message: '认领成功', key: key, taskId: task.id });
+// 删除自己推送的题目
+app.delete('/api/problem/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const { accountId, password } = req.body;
+    const prob = data.problems.find(p => p.id === id);
+    if (!prob) return res.status(404).json({ message: '题目不存在' });
+    const member = verifyMember(accountId, password);
+    if (!member) return res.status(401).json({ message: '身份校验失败' });
+    if (prob.accountId !== member.id) return res.status(403).json({ message: '只能删除自己推送的题目' });
+    if (data.config.lockEditing) return res.status(403).json({ message: '当前已锁定，禁止编辑' });
+    data.problems = data.problems.filter(p => p.id !== id);
+    saveData();
+    res.json({ message: '题目已删除' });
 });
 
-// 验证密钥
-app.post('/api/tasks/:id/verify-key', (req, res) => {
-    const id = parseInt(req.params.id);
-    const { key } = req.body;
-    if (!key) return res.status(400).json({ message: '缺少密钥' });
-    
-    const task = tasks.find(t => t.id === id);
-    if (!task) return res.status(404).json({ message: '任务不存在' });
-    if (!task.claimed) return res.status(403).json({ message: '任务未被认领' });
-    if (task.key === key) {
-        res.json({ valid: true, message: '密钥验证通过' });
-    } else {
-        res.status(403).json({ valid: false, message: '密钥错误' });
-    }
-});
+// 推送题目
+app.post('/api/problems', (req, res) => {
+    const { accountId, password, dailyTaskId, title, link, difficulty } = req.body;
+    const member = verifyMember(accountId, password);
+    if (!member) return res.status(401).json({ message: '身份校验失败' });
+    if (data.config.lockEditing) return res.status(403).json({ message: '当前已锁定，禁止推题' });
+    if (!title || !title.trim()) return res.status(400).json({ message: '请填写题目名称' });
+    if (!link || !link.trim()) return res.status(400).json({ message: '请填写题目链接' });
+    const task = data.dailyTasks.find(t => t.id === Number(dailyTaskId));
+    if (!task) return res.status(404).json({ message: '每日任务不存在' });
 
-// 切换完成状态（需要密钥验证）
-app.patch('/api/tasks/:id/toggle-complete', (req, res) => {
-    const id = parseInt(req.params.id);
-    const { key } = req.body;
-    if (!key) return res.status(400).json({ message: '缺少任务密钥' });
-    
-    const task = tasks.find(t => t.id === id);
-    if (!task) return res.status(404).json({ message: '任务不存在' });
-    if (!task.claimed) return res.status(403).json({ message: '任务未被认领，无需密钥' });
-    if (task.key !== key) return res.status(403).json({ message: '密钥错误，无权操作此任务' });
-    
-    const lock = task.completionLock || 'none';
-    if (lock !== 'none') {
-        const msg = lock === 'force_completed' ? '该任务已被强制为已完成' : '该任务已被强制为未完成';
-        return res.status(403).json({ message: msg });
-    }
-    task.completed = !task.completed;
-    saveTasks(tasks);
-    res.json({ message: task.completed ? '任务已完成' : '已撤销完成', completed: task.completed });
-});
+    // 简单校验链接
+    const finalLink = String(link).trim();
+    const normalized = /^https?:\/\//i.test(finalLink) ? finalLink : `https://${finalLink}`;
 
-// 更新备注（需要密钥验证）
-app.patch('/api/tasks/:id/notes', (req, res) => {
-    const id = parseInt(req.params.id);
-    const { notes, key } = req.body;
-    if (!key) return res.status(400).json({ message: '缺少任务密钥' });
-    
-    const task = tasks.find(t => t.id === id);
-    if (!task) return res.status(404).json({ message: '任务不存在' });
-    if (!task.claimed) return res.status(403).json({ message: '任务未被认领，无需密钥' });
-    if (task.key !== key) return res.status(403).json({ message: '密钥错误，无权操作此任务' });
-    
-    task.notes = notes !== undefined ? notes.trim() : '';
-    saveTasks(tasks);
-    res.json({ message: '备注已更新', notes: task.notes });
+    const problem = {
+        id: nextProblemId++,
+        dailyTaskId: Number(dailyTaskId),
+        accountId: member.id,
+        title: String(title).trim(),
+        link: normalized,
+        difficulty: DIFFICULTIES.includes(difficulty) ? difficulty : 'red',
+        createdAt: new Date().toISOString()
+    };
+    data.problems.push(problem);
+    saveData();
+    res.json({ message: '题目推送成功', problem });
 });
 
 // ---------- 管理员 API ----------
-const ADMIN_PASSWORD = 'whatever';
-
 app.post('/api/admin/verify', (req, res) => {
     const { password } = req.body;
-    if (password === ADMIN_PASSWORD) res.json({ success: true });
+    if (isAdmin(password)) res.json({ success: true });
     else res.status(401).json({ success: false, message: '密码错误' });
 });
 
-// 手动保存历史快照
-app.post('/api/admin/save-history', (req, res) => {
-    const { password, reason } = req.body;
-    if (password !== ADMIN_PASSWORD) return res.status(401).json({ message: '密码错误' });
-    
-    const success = saveHistorySnapshot(tasks, reason || '管理员手动保存');
-    if (success) {
-        res.json({ message: '历史快照已保存' });
-    } else {
-        res.status(500).json({ message: '保存历史快照失败' });
-    }
+// 修改管理员密码
+app.post('/api/admin/change-password', (req, res) => {
+    const { password, newPassword } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (!newPassword || String(newPassword).length < 1) return res.status(400).json({ message: '新密码不能为空' });
+    data.config.adminPassword = String(newPassword);
+    saveData();
+    res.json({ message: '管理员密码已修改' });
 });
 
-app.post('/api/admin/config', (req, res) => {
-    const { allocationLocked, password } = req.body;
-    if (password !== ADMIN_PASSWORD) return res.status(401).json({ message: '密码错误' });
-    if (allocationLocked !== undefined) globalConfig.allocationLocked = !!allocationLocked;
-    saveTasks(tasks);
-    res.json({ message: '配置已更新', config: globalConfig });
-});
-
-app.post('/api/admin/reset', (req, res) => {
-    tasks.forEach(t => {
-        t.claimed = false;
-        t.claimant = '';
-        t.key = '';
-        t.completed = false;
-        t.notes = '';
-        t.completionLock = 'none';
-    });
-    saveTasks(tasks);
-    res.json({ message: '已重置所有内容' });
-});
-
-app.post('/api/admin/tasks', (req, res) => {
-    const { description } = req.body;
-    if (!description || !description.trim()) return res.status(400).json({ message: '描述不能为空' });
-    const newTask = {
-        id: nextId++,
-        description: description.trim(),
-        claimed: false,
-        claimant: '',
-        key: '',
-        completed: false,
-        notes: '',
-        completionLock: 'none'
+// 添加账号（初始密码=用户名，可由成员修改）
+app.post('/api/admin/account', (req, res) => {
+    const { password, name } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (!name || !name.trim()) return res.status(400).json({ message: '请输入账号名' });
+    const finalName = String(name).trim();
+    if (data.accounts.some(a => a.name === finalName)) return res.status(409).json({ message: '账号名已存在' });
+    const account = {
+        id: nextAccountId++,
+        name: finalName,
+        password: hashPassword(finalName), // 初始密码=用户名
+        createdAt: new Date().toISOString()
     };
-    tasks.push(newTask);
-    saveTasks(tasks);
-    res.json({ message: '任务添加成功', task: newTask });
+    data.accounts.push(account);
+    saveData();
+    res.json({ message: `账号已添加，初始密码：${finalName}`, account: { id: account.id, name: account.name } });
 });
 
-app.post('/api/admin/tasks/batch', (req, res) => {
-    const { tasks: newTasks } = req.body;
-    if (!Array.isArray(newTasks) || newTasks.length === 0) {
-        return res.status(400).json({ message: '请提供至少一个任务' });
-    }
-    tasks = newTasks.map((desc, index) => ({
-        id: index + 1,
-        description: desc.trim(),
-        claimed: false,
-        claimant: '',
-        key: '',
-        completed: false,
+// 重置账号密码
+app.patch('/api/admin/account/:id/password', (req, res) => {
+    const { password, newPassword } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const account = findAccount(req.params.id);
+    if (!account) return res.status(404).json({ message: '账号不存在' });
+    account.password = hashPassword(newPassword);
+    saveData();
+    res.json({ message: '账号密码已重置' });
+});
+
+// 删除账号
+app.delete('/api/admin/account/:id', (req, res) => {
+    const { password } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    if (!data.accounts.some(a => a.id === id)) return res.status(404).json({ message: '账号不存在' });
+    data.accounts = data.accounts.filter(a => a.id !== id);
+    // 连带删除该账号的比赛与题目
+    data.competitions = data.competitions.filter(c => c.accountId !== id);
+    data.problems = data.problems.filter(p => p.accountId !== id);
+    saveData();
+    res.json({ message: '账号已删除' });
+});
+
+// 添加每日任务
+app.post('/api/admin/daily-task', (req, res) => {
+    const { password, date, title } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (!date) return res.status(400).json({ message: '请选择日期' });
+    if (!title || !title.trim()) return res.status(400).json({ message: '请填写任务标题' });
+    const task = {
+        id: nextTaskId++,
+        date: String(date),
+        title: String(title).trim(),
+        createdAt: new Date().toISOString()
+    };
+    data.dailyTasks.push(task);
+    saveData();
+    res.json({ message: '每日任务已添加', task });
+});
+
+// 删除每日任务（连带比赛与题目）
+app.delete('/api/admin/daily-task/:id', (req, res) => {
+    const { password } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    if (!data.dailyTasks.some(t => t.id === id)) return res.status(404).json({ message: '每日任务不存在' });
+    data.dailyTasks = data.dailyTasks.filter(t => t.id !== id);
+    data.competitions = data.competitions.filter(c => c.dailyTaskId !== id);
+    data.problems = data.problems.filter(p => p.dailyTaskId !== id);
+    saveData();
+    res.json({ message: '每日任务已删除' });
+});
+
+// 给账号分配比赛
+app.post('/api/admin/competition', (req, res) => {
+    const { password, dailyTaskId, accountId, title, link } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (!data.dailyTasks.some(t => t.id === Number(dailyTaskId))) return res.status(404).json({ message: '每日任务不存在' });
+    const account = findAccount(accountId);
+    if (!account) return res.status(404).json({ message: '账号不存在' });
+    if (!title || !title.trim()) return res.status(400).json({ message: '请填写比赛名称' });
+    const now = new Date().toISOString();
+    const comp = {
+        id: nextCompetitionId++,
+        dailyTaskId: Number(dailyTaskId),
+        accountId: account.id,
+        title: String(title).trim(),
+        link: (link && link.trim()) ? ((/^https?:\/\//i.test(link.trim()) ? link.trim() : `https://${link.trim()}`)) : '',
+        progress: 'pending',
         notes: '',
-        completionLock: 'none'
-    }));
-    nextId = tasks.length + 1;
-    saveTasks(tasks);
-    res.json({ message: `已设置 ${tasks.length} 个任务` });
+        createdAt: now,
+        updatedAt: now
+    };
+    data.competitions.push(comp);
+    saveData();
+    res.json({ message: '比赛已分配', competition: comp });
 });
 
-app.delete('/api/admin/tasks/:id', (req, res) => {
-    const id = parseInt(req.params.id);
-    const index = tasks.findIndex(t => t.id === id);
-    if (index === -1) return res.status(404).json({ message: '任务不存在' });
-    tasks.splice(index, 1);
-    saveTasks(tasks);
-    res.json({ message: '任务已删除' });
+// 管理员修改/强制设置任何比赛（标题、成员、进度、备注、链接）
+app.patch('/api/admin/competition/:id', (req, res) => {
+    const { password, title, accountId, progress, notes, link } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    const comp = data.competitions.find(c => c.id === id);
+    if (!comp) return res.status(404).json({ message: '比赛不存在' });
+    if (accountId !== undefined && findAccount(accountId)) comp.accountId = Number(accountId);
+    if (title !== undefined && title.trim()) comp.title = String(title).trim();
+    if (progress !== undefined && ['pending', 'ongoing', 'done'].includes(progress)) comp.progress = progress;
+    if (notes !== undefined) comp.notes = String(notes);
+    if (link !== undefined) comp.link = link.trim() ? (/^https?:\/\//i.test(link.trim()) ? link.trim() : `https://${link.trim()}`) : '';
+    comp.updatedAt = new Date().toISOString();
+    saveData();
+    res.json({ message: '比赛已更新', competition: comp });
 });
 
-app.patch('/api/admin/tasks/:id/completion-lock', (req, res) => {
-    const id = parseInt(req.params.id);
-    const { lock, password } = req.body;
-    if (password !== ADMIN_PASSWORD) return res.status(401).json({ message: '密码错误' });
-    const task = tasks.find(t => t.id === id);
-    if (!task) return res.status(404).json({ message: '任务不存在' });
-    if (!['none', 'force_completed', 'force_uncompleted'].includes(lock)) {
-        return res.status(400).json({ message: '无效的锁定模式' });
+// 删除比赛
+app.delete('/api/admin/competition/:id', (req, res) => {
+    const { password } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    if (!data.competitions.some(c => c.id === id)) return res.status(404).json({ message: '比赛不存在' });
+    data.competitions = data.competitions.filter(c => c.id !== id);
+    saveData();
+    res.json({ message: '比赛已删除' });
+});
+
+// 管理员删除任意题目
+app.delete('/api/admin/problem/:id', (req, res) => {
+    const { password } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    if (!data.problems.some(p => p.id === id)) return res.status(404).json({ message: '题目不存在' });
+    data.problems = data.problems.filter(p => p.id !== id);
+    saveData();
+    res.json({ message: '题目已删除' });
+});
+
+// 管理员推题（归属显示为“管理员”）
+app.post('/api/admin/problem', (req, res) => {
+    const { password, dailyTaskId, title, link, difficulty } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (!title || !title.trim()) return res.status(400).json({ message: '请填写题目名称' });
+    if (!link || !link.trim()) return res.status(400).json({ message: '请填写题目链接' });
+    const task = data.dailyTasks.find(t => t.id === Number(dailyTaskId));
+    if (!task) return res.status(404).json({ message: '每日任务不存在' });
+    const finalLink = String(link).trim();
+    const normalized = /^https?:\/\//i.test(finalLink) ? finalLink : `https://${finalLink}`;
+    const problem = {
+        id: nextProblemId++,
+        dailyTaskId: Number(dailyTaskId),
+        accountId: 0, // 0 = 管理员
+        title: String(title).trim(),
+        link: normalized,
+        difficulty: DIFFICULTIES.includes(difficulty) ? difficulty : 'red',
+        createdAt: new Date().toISOString()
+    };
+    data.problems.push(problem);
+    saveData();
+    res.json({ message: '题目推送成功', problem });
+});
+
+// 管理员编辑任意题目
+app.patch('/api/admin/problem/:id', (req, res) => {
+    const { password, title, link, difficulty } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const id = Number(req.params.id);
+    const prob = data.problems.find(p => p.id === id);
+    if (!prob) return res.status(404).json({ message: '题目不存在' });
+    if (title !== undefined && title.trim()) prob.title = String(title).trim();
+    if (link !== undefined && link.trim()) {
+        const finalLink = String(link).trim();
+        prob.link = /^https?:\/\//i.test(finalLink) ? finalLink : `https://${finalLink}`;
     }
-    task.completionLock = lock;
-    saveTasks(tasks);
-    res.json({ message: '锁定状态已更新', completionLock: task.completionLock });
+    if (difficulty !== undefined && DIFFICULTIES.includes(difficulty)) prob.difficulty = difficulty;
+    saveData();
+    res.json({ message: '题目已更新', problem: prob });
+});
+
+// 全局配置
+app.post('/api/admin/config', (req, res) => {
+    const { password, lockEditing } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    if (lockEditing !== undefined) data.config.lockEditing = !!lockEditing;
+    saveData();
+    res.json({ message: '配置已更新' });
+});
+
+// 重置全部数据（保留当前管理员密码）
+app.post('/api/admin/reset', (req, res) => {
+    const { password } = req.body;
+    if (!isAdmin(password)) return res.status(401).json({ message: '密码错误' });
+    const adminPassword = data.config.adminPassword;
+    data = defaultData();
+    data.config.adminPassword = adminPassword;
+    nextAccountId = 1; nextTaskId = 1; nextCompetitionId = 1; nextProblemId = 1;
+    saveData();
+    res.json({ message: '已重置全部数据' });
 });
 
 app.listen(PORT, () => {
     console.log(`✅ 服务器运行在 http://localhost:${PORT}`);
-    console.log(`📋 当前任务数: ${tasks.length}`);
-    console.log(`🔐 管理员密码: ${ADMIN_PASSWORD}`);
-    console.log(`🔒 分配锁定: ${globalConfig.allocationLocked}`);
-    console.log(`📚 历史记录目录: ${HISTORY_DIR}`);
+    console.log(`👥 账号数: ${data.accounts.length}`);
+    console.log(`📋 每日任务数: ${data.dailyTasks.length}`);
+    console.log(`🎯 比赛数: ${data.competitions.length}`);
+    console.log(`🧩 题目数: ${data.problems.length}`);
+    console.log(`🔐 管理员密码: ${'*'.repeat(String(data.config.adminPassword).length)}（可在管理面板修改）`);
+    console.log(`⚠️  管理员默认密码: ${DEFAULT_ADMIN_PASSWORD}`);
 });
